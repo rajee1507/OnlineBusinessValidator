@@ -1,9 +1,0 @@
-streamlit
-requests
-beautifulsoup4
-pandas
-openai
-python-whois
-duckduckgo_search
-tldextract
-openpyxl
