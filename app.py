@@ -177,8 +177,24 @@ if st.button("Run Analysis"):
         ai_result = ai_analysis(openai_key, business_input, domain, who, len(all_reviews))
         st.write(ai_result)
 
-        # export
-        if len(all_reviews) > 0:
-            df.to_excel("business_validation_report.xlsx", index=False)
-            with open("business_validation_report.xlsx", "rb") as f:
-                st.download_button("Download Excel Report", f, file_name="validation_report.xlsx")
+# ------------------
+# Always Create Excel + Enable Download Button
+# ------------------
+from io import BytesIO
+
+st.subheader("📥 Download Full Report")
+
+df = pd.DataFrame(all_reviews)
+
+output = BytesIO()
+with pd.ExcelWriter(output, engine="openpyxl") as writer:
+    df.to_excel(writer, index=False, sheet_name="Reviews")
+
+excel_data = output.getvalue()
+
+st.download_button(
+    label="Download Excel Report",
+    data=excel_data,
+    file_name="business_validation_report.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
