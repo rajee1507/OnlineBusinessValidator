@@ -1,9 +1,8 @@
-streamlit>=1.20
-pandas
+streamlit
 requests
 beautifulsoup4
+pandas
 openpyxl
-duckduckgo_search
 tldextract
-openai
-python-whois
+duckduckgo-search
+openai>=1.0.0
