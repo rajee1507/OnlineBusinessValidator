@@ -6,23 +6,15 @@ from bs4 import BeautifulSoup
 import json
 import re
 from datetime import datetime
-import time
 
-# optional libs
-try:
-    from duckduckgo_search import ddg
-except Exception:
-    ddg = None
+# NEW OpenAI client (2025 syntax)
+from openai import OpenAI
+client = None
 
-try:
-    import tldextract
-except Exception:
-    tldextract = None
+# DuckDuckGo search (new stable version)
+from duckduckgo_search import DDGS
 
-try:
-    import openai
-except Exception:
-    openai = None
+import tldextract
 
 
 # ==========================================================
@@ -31,69 +23,113 @@ except Exception:
 st.set_page_config(page_title="Online Business Validator", layout="wide")
 st.title("🔍 OnlineBusinessValidator")
 
-
 st.markdown("""
-Enter a business name **OR** website URL.  
-Optional: Paste SerpAPI + OpenAI API keys in sidebar.  
-App will produce **one Excel file with 4 sheets**:
+Produces **one Excel file** with 4 sheets:
+
 1. Google_Reviews  
-2. API_Reviews (placeholder)  
+2. API_Reviews  
 3. Scraped_Free_Reviews  
-4. AI_Full_Business_Report (structured)
+4. AI_Full_Business_Report  
 """)
 
 
 # ==========================================================
-# UTILS
+# HELPERS
 # ==========================================================
-def safe_get(url, timeout=12):
+def safe_get(url):
     try:
-        return requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
+        return requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=12
+        )
     except:
         return None
 
 
-def get_domain_from_input(q):
-    if q.startswith("http"):
-        try:
-            if tldextract:
-                ext = tldextract.extract(q)
-                return f"{ext.domain}.{ext.suffix}"
-            return re.sub(r"^https?://", "", q).split("/")[0]
-        except:
-            return q
-    if "." in q and " " not in q:
-        return q
-    return q.strip()
+def get_domain(query):
+    if query.startswith("http"):
+        ext = tldextract.extract(query)
+        return f"{ext.domain}.{ext.suffix}"
+    if "." in query and " " not in query:
+        return query
+    return query.strip()
 
 
 # ==========================================================
-# GENERIC REVIEW EXTRACTOR
+# GOOGLE REVIEWS — SERPAPI
 # ==========================================================
-def extract_reviews_from_html_generic(url, html):
+def get_google_reviews(domain, serp_key):
+    if not serp_key:
+        return []
+
+    url = "https://serpapi.com/search.json"
+    params = {
+        "engine": "google_maps_reviews",
+        "q": domain,
+        "hl": "en",
+        "api_key": serp_key
+    }
+
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        if r.status_code != 200:
+            return []
+
+        data = r.json()
+        reviews = data.get("reviews") or []
+
+        out = []
+        for rv in reviews:
+            out.append({
+                "reviewer": rv.get("user_name"),
+                "rating": rv.get("rating"),
+                "date": rv.get("date"),
+                "text": rv.get("text"),
+                "link": rv.get("source")
+            })
+        return out
+    except:
+        return []
+
+
+# ==========================================================
+# SCRAPING — FREE SOURCES
+# ==========================================================
+def ddg_search(q, max_results=5):
     results = []
-    if not html:
-        return results
+    with DDGS() as ddgs:
+        for r in ddgs.text(q, max_results=max_results):
+            if r and "href" in r:
+                results.append(r["href"])
+    return results
 
+
+def extract_reviews_from_html(url, html):
     soup = BeautifulSoup(html, "html.parser")
+    out = []
 
-    # JSON-LD
+    # JSON-LD structured reviews
     for script in soup.find_all("script", type="application/ld+json"):
         try:
             data = json.loads(script.string)
         except:
             continue
 
-        nodes = data if isinstance(data, list) else [data]
+        if isinstance(data, dict):
+            data = [data]
 
-        for node in nodes:
+        for node in data:
             if not isinstance(node, dict):
                 continue
 
-            if node.get("@type") in ("Product", "Service") and node.get("review"):
-                for r in node["review"]:
-                    results.append({
-                        "source": url,
+            if "review" in node:
+                revs = node["review"]
+                if not isinstance(revs, list):
+                    revs = [revs]
+
+                for r in revs:
+                    out.append({
                         "site": url,
                         "reviewer": r.get("author"),
                         "rating": (r.get("reviewRating") or {}).get("ratingValue"),
@@ -101,220 +137,144 @@ def extract_reviews_from_html_generic(url, html):
                         "text": r.get("reviewBody")
                     })
 
-            if node.get("@type") == "Review":
-                results.append({
-                    "source": url,
-                    "site": url,
-                    "reviewer": node.get("author"),
-                    "rating": (node.get("reviewRating") or {}).get("ratingValue"),
-                    "date": node.get("datePublished"),
-                    "text": node.get("reviewBody")
-                })
+    # fallback — detect visible review-like text
+    blocks = soup.find_all(
+        ["p", "div"],
+        string=re.compile(r"review|bad|good|service|experience|company|scam|refund", re.I)
+    )
 
-    # heuristic fallback
-    candidates = soup.find_all(class_=re.compile("review|comment|testimonial|rating", re.I))
-    for c in candidates:
-        text = c.get_text(" ", strip=True)
-        if len(text) < 40:
-            continue
-        results.append({
-            "source": url,
-            "site": url,
-            "reviewer": None,
-            "rating": None,
-            "date": None,
-            "text": text
-        })
-
-    return results
-
-
-# ==========================================================
-# SERPAPI GOOGLE REVIEWS
-# ==========================================================
-def serpapi_google_reviews(query, serpapi_key):
-    if not serpapi_key:
-        return []
-
-    try:
-        params = {
-            "engine": "google_maps_reviews",
-            "q": query,
-            "api_key": serpapi_key,
-            "hl": "en"
-        }
-
-        r = requests.get("https://serpapi.com/search.json", params=params, timeout=20)
-        if r.status_code != 200:
-            return []
-
-        data = r.json()
-        reviews = data.get("reviews", [])
-
-        out = []
-        for r in reviews:
+    for b in blocks:
+        text = b.get_text(" ", strip=True)
+        if len(text) > 50:
             out.append({
-                "source": "SerpAPI_Google",
-                "site": "google",
-                "reviewer": r.get("user_name"),
-                "rating": r.get("rating"),
-                "date": r.get("date"),
-                "text": r.get("text"),
-                "link": r.get("source")
+                "site": url,
+                "reviewer": None,
+                "rating": None,
+                "date": None,
+                "text": text
             })
-        return out
 
-    except:
-        return []
+    return out
 
 
-# ==========================================================
-# DISCOVERY SCRAPER
-# ==========================================================
-def discover_review_pages(query):
-    if ddg is None:
-        return []
+def scrape_free_reviews(query):
+    keywords = ["trustpilot", "sitejabber", "reddit", "glassdoor"]
+    urls = []
 
-    sources = ["trustpilot", "sitejabber", "reddit", "producthunt", "glassdoor"]
-    pages = []
+    for site in keywords:
+        urls.extend(ddg_search(f"{query} {site} reviews", max_results=3))
 
-    for s in sources:
-        hits = ddg(f"{query} {s}", max_results=4)
-        for h in hits or []:
-            url = h.get("href") or h.get("url")
-            if url:
-                pages.append(url)
-
-    return pages
-
-
-def scrape_multiple_pages(query):
-    pages = discover_review_pages(query)
     all_reviews = []
 
-    for u in pages:
+    for u in urls:
         r = safe_get(u)
         if not r:
             continue
-        revs = extract_reviews_from_html_generic(u, r.text)
+        html = r.text
+        revs = extract_reviews_from_html(u, html)
         all_reviews.extend(revs)
 
     return all_reviews
 
 
 # ==========================================================
-# AI PROMPT
+# OPENAI — NEW API
 # ==========================================================
-def build_ai_prompt(business, domain, google, scraped):
-    return f"""
-You are a due-diligence analyst. Produce a full one-page structured JSON report.
+def generate_ai_report(query, domain, google_df, free_df, openai_key):
+    global client
+    if not openai_key:
+        return {"error": "OpenAI key not provided"}
 
-Business: {business}
+    client = OpenAI(api_key=openai_key)
+
+    prompt = f"""
+Write a structured JSON due-diligence report.
+
+Business: {query}
 Domain: {domain}
 
-Google sample reviews: {google}
-Scraped sample reviews: {scraped}
+Google reviews sample:
+{google_df.head(5).to_dict('records')}
+
+Scraped free reviews sample:
+{free_df.head(5).to_dict('records')}
 
 Return ONLY valid JSON with fields:
-title, executive_summary, overall_score, strengths, weaknesses,
-customer_sentiment, red_flags, recommendations, next_steps, data_summary
+title, summary, risk_score, strengths, weaknesses,
+sentiment, red_flags, recommendations, final_verdict
 """
 
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Return ONLY valid JSON."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=800
+    )
 
-def call_openai(openai_key, prompt):
-    if not openai_key:
-        return None
+    raw = resp.choices[0].message.content
 
     try:
-        openai.api_key = openai_key
-        r = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Return ONLY valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=900
-        )
-        raw = r["choices"][0]["message"]["content"]
-
-        try:
-            return json.loads(raw)
-        except:
-            m = re.search(r"(\{[\s\S]*\})", raw)
-            if m:
-                return json.loads(m.group(1))
-            return {"raw_unparsed": raw}
-
-    except Exception as e:
-        return {"error": str(e)}
+        return json.loads(raw)
+    except:
+        return {"raw": raw}
 
 
 # ==========================================================
-# EXCEL BUILDER (FIXED — NO writer.save())
+# EXCEL BUILDER — FIXED
 # ==========================================================
-def build_excel_bytes(df_google, df_api, df_scrape, ai):
+def build_excel(df1, df2, df3, ai):
     output = BytesIO()
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_google.to_excel(writer, sheet_name="Google_Reviews", index=False)
-        df_api.to_excel(writer, sheet_name="API_Reviews", index=False)
-        df_scrape.to_excel(writer, sheet_name="Scraped_Free_Reviews", index=False)
+        df1.to_excel(writer, sheet_name="Google_Reviews", index=False)
+        df2.to_excel(writer, sheet_name="API_Reviews", index=False)
+        df3.to_excel(writer, sheet_name="Scraped_Free_Reviews", index=False)
 
-        # AI structured sheet
-        if isinstance(ai, dict):
-            rows = [{"section": k, "content": str(v)} for k, v in ai.items()]
-            pd.DataFrame(rows).to_excel(writer, sheet_name="AI_Full_Business_Report", index=False)
-        else:
-            pd.DataFrame([{"raw": str(ai)}]).to_excel(
-                writer, sheet_name="AI_Full_Business_Report", index=False
-            )
+        ai_rows = [{"section": k, "content": str(v)} for k, v in ai.items()]
+        pd.DataFrame(ai_rows).to_excel(writer, sheet_name="AI_Full_Business_Report", index=False)
 
     output.seek(0)
     return output.getvalue()
 
 
 # ==========================================================
-# STREAMLIT UI
+# UI
 # ==========================================================
-st.sidebar.header("API Keys (optional)")
-openai_key = st.sidebar.text_input("OpenAI API Key", type="password")
-serpapi_key = st.sidebar.text_input("SerpAPI Key", type="password")
+st.sidebar.header("API Keys")
+openai_key = st.sidebar.text_input("OpenAI Key", type="password")
+serp_key = st.sidebar.text_input("SerpAPI Key", type="password")
 
-query = st.text_input("Business name OR website URL")
-run = st.button("Run Analysis")
+query = st.text_input("Business name or URL")
+start = st.button("Run Analysis")
 
 
-if run:
+if start:
     if not query.strip():
-        st.error("Enter a business name or URL.")
+        st.error("Enter a business name or domain")
     else:
-        with st.spinner("Running full analysis..."):
+        with st.spinner("Collecting reviews..."):
 
-            domain = get_domain_from_input(query)
-            st.write("Domain:", domain)
+            domain = get_domain(query)
 
-            google_reviews = serpapi_google_reviews(domain, serpapi_key)
+            google_reviews = get_google_reviews(domain, serp_key)
             df_google = pd.DataFrame(google_reviews)
 
-            api_df = pd.DataFrame([], columns=["source","site","reviewer","rating","date","text"])
+            df_api = pd.DataFrame([], columns=["site", "reviewer", "rating", "date", "text"])
 
-            scraped = scrape_multiple_pages(query)
-            df_scrape = pd.DataFrame(scraped)
+            free_reviews = scrape_free_reviews(query)
+            df_free = pd.DataFrame(free_reviews)
 
-            # AI
-            prompt = build_ai_prompt(query, domain, df_google.head(5).to_dict("records"), df_scrape.head(5).to_dict("records"))
-            ai_report = call_openai(openai_key, prompt) if openai_key else {"info": "OpenAI key not provided"}
+            ai = generate_ai_report(query, domain, df_google, df_free, openai_key)
 
-            # excel
-            excel_bytes = build_excel_bytes(df_google, api_df, df_scrape, ai_report)
-
-            filename = f"report_{domain}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            excel_bytes = build_excel(df_google, df_api, df_free, ai)
 
             st.download_button(
                 "Download Excel (4 sheets)",
                 data=excel_bytes,
-                file_name=filename,
+                file_name=f"report_{domain}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-            st.success("Completed.")
+            st.success("Completed successfully!")
