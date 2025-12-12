@@ -1,36 +1,25 @@
-# Online Business Validator
+# OnlineBusinessValidator
 
-This Streamlit app validates online businesses using multiple sources:
+Streamlit app that validates online businesses by collecting reviews and generating an AI report.
 
-### ✔ Google Reviews (SerpAPI)
-### ✔ Free Scraped Review Sources (Trustpilot, SiteJabber, Reddit, Glassdoor, etc.)
-### ✔ AI Full Business Report (via OpenAI API)
+## What it does
+- Accepts a **Business Name** or **Website URL**.
+- Automatically discovers public review pages (Trustpilot, SiteJabber, Reddit, Glassdoor, ProductHunt, etc.) and scrapes them.
+- Optionally fetches Google Reviews using **SerpAPI** (put your SerpAPI key in the sidebar).
+- Optionally generates a full structured AI report using **OpenAI** (put your OpenAI key in the sidebar).
+- Produces a single Excel file with 4 sheets:
+  1. Google_Reviews
+  2. API_Reviews (placeholder)
+  3. Scraped_Free_Reviews
+  4. AI_Full_Business_Report
 
-The app generates **one Excel file** with 4 sheets:
+## How to run (Streamlit Cloud)
+1. Commit `app.py`, `requirements.txt`, `README.md` to your GitHub repo.
+2. Deploy to Streamlit Cloud (https://share.streamlit.io) and point to `app.py`.
+3. Open the app, paste API keys (optional), input business name or URL and click **Run Analysis**.
+4. Download the Excel report.
 
-1. Google_Reviews  
-2. API_Reviews (placeholder, future expansion)
-3. Scraped_Free_Reviews  
-4. AI_Full_Business_Report  
-
----
-
-## 🔧 Requirements
-
-All dependencies are listed in `requirements.txt`:
-
-- streamlit  
-- requests  
-- beautifulsoup4  
-- pandas  
-- openpyxl  
-- tldextract  
-- duckduckgo-search  
-- openai>=1.0.0  
-
----
-
-## 🚀 How to Run Locally
-
+## How to run (Colab / local)
+Install dependencies:
 ```bash
-streamlit run app.py
+pip install -r requirements.txt
