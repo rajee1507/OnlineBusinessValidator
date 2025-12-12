@@ -1,15 +1,36 @@
-# OnlineBusinessValidator
+# Online Business Validator
 
-Streamlit application that validates an online business using:
-- SerpAPI (optional) for Google Reviews
-- Free Scrapers (Trustpilot, SiteJabber, Reddit, ProductHunt, Glassdoor)
-- OpenAI (optional) for a full structured business report
-- Produces ONE Excel file with FOUR sheets:
-  1. Google_Reviews  
-  2. API_Reviews  
-  3. Scraped_Free_Reviews  
-  4. AI_Full_Business_Report  
+This Streamlit app validates online businesses using multiple sources:
 
-## How to run
-1. Clone repo  
-2. Install dependencies
+### ✔ Google Reviews (SerpAPI)
+### ✔ Free Scraped Review Sources (Trustpilot, SiteJabber, Reddit, Glassdoor, etc.)
+### ✔ AI Full Business Report (via OpenAI API)
+
+The app generates **one Excel file** with 4 sheets:
+
+1. Google_Reviews  
+2. API_Reviews (placeholder, future expansion)
+3. Scraped_Free_Reviews  
+4. AI_Full_Business_Report  
+
+---
+
+## 🔧 Requirements
+
+All dependencies are listed in `requirements.txt`:
+
+- streamlit  
+- requests  
+- beautifulsoup4  
+- pandas  
+- openpyxl  
+- tldextract  
+- duckduckgo-search  
+- openai>=1.0.0  
+
+---
+
+## 🚀 How to Run Locally
+
+```bash
+streamlit run app.py
